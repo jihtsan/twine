@@ -182,7 +182,11 @@ class Repository:
         """
         # NOTE(sigmavirus24): Not all indices are PyPI and pypi.io doesn't
         # have a similar interface for finding the package versions.
-        if not self.url.startswith((LEGACY_PYPI, WAREHOUSE, OLD_WAREHOUSE)):
+        if self.url.startswith((LEGACY_PYPI, WAREHOUSE, OLD_WAREHOUSE)):
+            json_base = LEGACY_PYPI
+        elif self.url.startswith((LEGACY_TEST_PYPI, TEST_WAREHOUSE)):
+            json_base = TEST_WAREHOUSE
+        else:
             return False
 
         safe_name = package.safe_name
@@ -192,7 +196,7 @@ class Repository:
             releases = self._releases_json_data.get(safe_name)
 
         if releases is None:
-            url = f"{LEGACY_PYPI}pypi/{safe_name}/json"
+            url = f"{json_base}pypi/{safe_name}/json"
             headers = {"Accept": "application/json"}
             response = self.session.get(url, headers=headers)
             if response.status_code == 200:

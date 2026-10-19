@@ -184,6 +184,55 @@ def test_package_is_uploaded_different_filenames(default_repo):
     assert default_repo.package_is_uploaded(package) is False
 
 
+@pytest.mark.parametrize(
+    "repository_url,json_url",
+    [
+        (utils.DEFAULT_REPOSITORY, "https://pypi.python.org/pypi/fake/json"),
+        (repository.LEGACY_PYPI, "https://pypi.python.org/pypi/fake/json"),
+        (repository.OLD_WAREHOUSE, "https://pypi.python.org/pypi/fake/json"),
+        (utils.TEST_REPOSITORY, "https://test.pypi.org/pypi/fake/json"),
+        (repository.LEGACY_TEST_PYPI, "https://test.pypi.org/pypi/fake/json"),
+    ],
+)
+@pytest.mark.parametrize(
+    "releases,expected",
+    [
+        ({"0.1": [{"filename": "fake.whl"}]}, True),
+        ({"0.1": [{"filename": "other.whl"}]}, False),
+        ({"0.2": [{"filename": "fake.whl"}]}, False),
+        ({}, False),
+    ],
+)
+def test_package_is_uploaded_queries_matching_index(
+    repository_url, json_url, releases, expected
+):
+    """Check the target index, caching results until explicitly bypassed."""
+    repo = repository.Repository(repository_url, "username", "password")
+    get = pretend.call_recorder(
+        lambda url, headers: pretend.stub(
+            status_code=200, json=lambda: {"releases": releases}
+        )
+    )
+    repo.session = pretend.stub(get=get)
+    package = pretend.stub(safe_name="fake", version="0.1", basefilename="fake.whl")
+
+    assert repo.package_is_uploaded(package) is expected
+    assert repo.package_is_uploaded(package) is expected
+    assert get.calls == [pretend.call(json_url, headers={"Accept": "application/json"})]
+
+    assert repo.package_is_uploaded(package, bypass_cache=True) is expected
+    assert len(get.calls) == 2
+
+
+def test_package_is_uploaded_testpypi_404():
+    """Allow new TestPyPI projects when their JSON endpoint returns 404."""
+    repo = repository.Repository(utils.TEST_REPOSITORY, "username", "password")
+    repo.session = pretend.stub(get=lambda url, headers: response_with(status_code=404))
+    package = pretend.stub(safe_name="fake", version="0.1", basefilename="fake.whl")
+
+    assert repo.package_is_uploaded(package) is False
+
+
 @pytest.mark.parametrize("disable_progress_bar", [True, False])
 def test_disable_progress_bar_is_forwarded_to_rich(
     monkeypatch, tmpdir, disable_progress_bar, default_repo

@@ -20,6 +20,7 @@ import requests
 from twine import cli
 from twine import exceptions
 from twine import package as package_file
+from twine import utils
 from twine.commands import upload
 
 from . import helpers
@@ -410,6 +411,47 @@ def test_prints_skip_message_for_uploaded_package(
     assert caplog.messages == [
         "Skipping twine-4.0.2-py3-none-any.whl because it appears to already exist"
     ]
+
+
+@pytest.mark.parametrize(
+    "repository_url", [utils.DEFAULT_REPOSITORY, utils.TEST_REPOSITORY]
+)
+@pytest.mark.parametrize("exists", [True, False])
+def test_skip_existing_checks_index_before_upload(
+    make_settings, repository_url, exists, stub_response, capsys, caplog
+):
+    """Skip known files before uploading, while still uploading missing files."""
+    upload_settings = make_settings(
+        repository_url=repository_url,
+        skip_existing=True,
+        username="username",
+        password="password",
+    )
+    repo = upload_settings.create_repository()
+    repo.session.get = lambda url, headers: pretend.stub(
+        status_code=200,
+        json=lambda: {
+            "releases": (
+                {"4.0.2": [{"filename": "twine-4.0.2-py3-none-any.whl"}]}
+                if exists
+                else {}
+            )
+        },
+    )
+    stub_response.text = ""
+    repo.session.post = pretend.call_recorder(lambda *args, **kwargs: stub_response)
+    upload_settings.create_repository = lambda: repo
+
+    upload.upload(upload_settings, [helpers.WHEEL_FIXTURE])
+
+    assert len(repo.session.post.calls) == (0 if exists else 1)
+    assert (
+        "Uploading twine-4.0.2-py3-none-any.whl" in capsys.readouterr().out
+    ) is not exists
+    assert (
+        "Skipping twine-4.0.2-py3-none-any.whl because it appears to already exist"
+        in caplog.messages
+    ) is exists
 
 
 def test_prints_skip_message_for_response(
